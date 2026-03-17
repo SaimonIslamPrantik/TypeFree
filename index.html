@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<!--
+  index.html — TypeFree
+  Main HTML document. Defines the page structure, loads external
+  CSS (style.css) and JavaScript (script.js), and contains all
+  markup for the header, typing area, stats bar, mode tabs,
+  results overlay, whitelist panel, and Elite Settings drawer.
+  No inline styles or scripts — all logic is in style.css / script.js.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TypeFree — Type Anything</title>
+
+  <!-- Google Fonts: JetBrains Mono (typing area) + Syne (display headings) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,700;1,300&family=Syne:wght@400;600;700&display=swap" rel="stylesheet">
+
+  <!-- Application styles -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════
+     HEADER
+     Contains the TypeFree logo (with animated dot)
+     and the top navigation buttons.
+════════════════════════════════════════════════ -->
+<header>
+  <!-- Logo wordmark with pulsing accent dot -->
+  <div class="logo">
+    <div class="logo-dot"></div>
+    TypeFree
+  </div>
+
+  <!-- Top-right navigation: free type mode, whitelist toggle, and settings -->
+  <nav>
+    <button class="active">free type</button>
+    <button onclick="toggleWhitelist(this)">+ whitelist</button>
+    <button onclick="openSettings()" id="settingsNavBtn">⚙ elite</button>
+  </nav>
+</header>
+
+
+<!-- ═══════════════════════════════════════════════
+     MAIN CONTENT
+════════════════════════════════════════════════ -->
+<main>
+
+  <!-- ── STATS BAR ──
+       Live session metrics displayed above the typing area.
+       Each .stat block fades in when a session starts (via JS). -->
+  <div class="stats-bar">
+    <!-- Words Per Minute counter -->
+    <div class="stat" id="statWpm">
+      <div class="stat-label">WPM</div>
+      <div class="stat-value neutral" id="wpmVal">0</div>
+    </div>
+    <!-- Accuracy: % of completed words that are valid English -->
+    <div class="stat" id="statAcc">
+      <div class="stat-label">Accuracy</div>
+      <div class="stat-value neutral" id="accVal">—</div>
+    </div>
+    <!-- Elapsed time (count-up) or countdown in timed modes -->
+    <div class="stat" id="statTime">
+      <div class="stat-label">Time</div>
+      <div class="stat-value neutral" id="timeVal">0s</div>
+    </div>
+    <!-- Number of completed words typed so far -->
+    <div class="stat" id="statWords">
+      <div class="stat-label">Words</div>
+      <div class="stat-value neutral" id="wordsVal">0</div>
+    </div>
+  </div>
+
+
+  <!-- ── DICTIONARY LOADING BAR ──
+       Shows a progress bar while the ~370k-word list downloads.
+       Hidden automatically once loading completes. -->
+  <div id="dictLoadWrap" style="margin-bottom:14px;transition:opacity 0.4s,transform 0.4s;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+      <span id="dictStatus" style="font-size:0.7rem;color:var(--sub);letter-spacing:0.08em;">loading dictionary…</span>
+      <span style="font-size:0.68rem;color:var(--muted);letter-spacing:0.06em;">~370k words</span>
+    </div>
+    <!-- Animated fill bar controlled by JS during streaming download -->
+    <div style="height:2px;background:var(--border);border-radius:2px;overflow:hidden;">
+      <div id="dictBar" style="height:100%;width:0%;background:var(--accent);border-radius:2px;transition:width 0.15s linear,background 0.4s;"></div>
+    </div>
+  </div>
+
+
+  <!-- ── MODE TABS ──
+       Switches between ∞ free typing and timed modes (30s/60s/120s).
+       Active mode is marked with the .active class; JS handles setTimer(). -->
+  <div class="mode-tabs">
+    <button class="mode-tab active">∞ free</button>
+    <button class="mode-tab" onclick="setTimer(30,this)">30s</button>
+    <button class="mode-tab" onclick="setTimer(60,this)">60s</button>
+    <button class="mode-tab" onclick="setTimer(120,this)">120s</button>
+  </div>
+
+
+  <!-- ── TYPING AREA ──
+       The invisible <textarea> captures input; .word-display renders
+       color-coded word highlighting on top of it. -->
+  <div class="typing-wrapper">
+    <div class="typing-inner">
+
+      <!-- Word highlighting overlay: valid (text), invalid (red), current (bright) -->
+      <div class="word-display" id="wordDisplay"></div>
+
+      <!-- Hidden textarea — transparent text, visible caret only -->
+      <textarea
+        id="typeInput"
+        spellcheck="false"
+        autocomplete="off"
+        autocorrect="off"
+        autocapitalize="off">
+      </textarea>
+
+      <!-- Start hint: visible until first keystroke -->
+      <div class="hint" id="hint">
+        <span class="hint-text">start typing — anything you want</span>
+      </div>
+
+    </div>
+  </div>
+
+
+  <!-- ── BOTTOM BAR ──
+       Shows real-time valid/invalid/char counts on the left,
+       and session control buttons (stop/reset) on the right. -->
+  <div class="bottom-bar">
+    <div class="meta-info">
+      <span><strong id="validCount">0</strong> valid</span>
+      <span><strong id="invalidCount">0</strong> invalid</span>
+      <span><strong id="charCount">0</strong> chars</span>
+    </div>
+    <div class="actions">
+      <!-- Stop button — only visible during an active session -->
+      <button class="btn btn-ghost" id="stopBtn" onclick="stopSession()" style="display:none">
+        ⏹ stop
+      </button>
+      <!-- Reset button — always visible; clears the session -->
+      <button class="btn btn-ghost" onclick="resetSession()">
+        ↺ reset
+      </button>
+    </div>
+  </div>
+
+
+  <!-- ── WPM GRAPH ──
+       Canvas-rendered line chart of WPM over time.
+       Hidden until a session ends (animated fade-in via .visible class). -->
+  <div class="graph-section" id="graphSection">
+    <div class="graph-header">
+      <div class="graph-title">WPM over time</div>
+      <!-- Peak WPM label updated by drawGraph() -->
+      <div class="graph-title" id="graphPeak" style="color:var(--accent)"></div>
+    </div>
+    <canvas id="wpmCanvas"></canvas>
+  </div>
+
+
+  <!-- ── WHITELIST PANEL ──
+       Collapsible panel (toggled by the "+ whitelist" nav button).
+       Lets users add custom words that are always treated as valid. -->
+  <div class="whitelist-panel" id="whitelistPanel">
+    <div class="whitelist-inner">
+      <div class="whitelist-label">Custom word whitelist (always marked valid)</div>
+      <div class="whitelist-input-row">
+        <!-- Input for entering a new whitelist word -->
+        <input type="text" id="whitelistInput" placeholder="e.g. bruh, fwiw, lol..." maxlength="30">
+        <button class="btn btn-ghost" onclick="addWhitelistWord()" style="padding:7px 14px;">add</button>
+      </div>
+      <!-- Tag pills for each whitelisted word, with × remove buttons -->
+      <div class="whitelist-tags" id="whitelistTags"></div>
+    </div>
+  </div>
+
+</main><!-- /main -->
+
+
+<!-- ═══════════════════════════════════════════════
+     FOOTER
+     WPM formula reminder and author credit.
+════════════════════════════════════════════════ -->
+<footer>
+  wpm = (chars / 5) / min &nbsp;·&nbsp; accuracy based on valid english words &nbsp;·&nbsp; esc to reset
+  <br>
+  <span style="margin-top:6px;display:inline-block;opacity:0.5;">made with ❤️‍🩹 by <a href="https://github.com/SaimonIslamPrantik" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none;transition:opacity 0.2s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.8'">prantik</a></span>
+</footer>
+
+
+<!-- ═══════════════════════════════════════════════
+     RESULTS OVERLAY
+     Full-screen modal displayed after a session ends.
+     Fades in over a blurred backdrop; dismissed via "dismiss"
+     or "↺ try again" buttons.
+════════════════════════════════════════════════ -->
+<div class="results-overlay" id="resultsOverlay">
+  <div class="results-card">
+
+    <!-- Modal title -->
+    <div class="results-title">session complete</div>
+
+    <!-- 3×2 grid of final session statistics -->
+    <div class="results-grid">
+
+      <!-- Words Per Minute -->
+      <div class="result-item">
+        <div class="result-label">WPM</div>
+        <div class="result-val" id="rWpm">0</div>
+        <div class="result-unit">words / min</div>
+      </div>
+
+      <!-- Accuracy percentage -->
+      <div class="result-item">
+        <div class="result-label">Accuracy</div>
+        <div class="result-val" id="rAcc">—</div>
+        <div class="result-unit">% valid words</div>
+      </div>
+
+      <!-- Session duration in seconds -->
+      <div class="result-item">
+        <div class="result-label">Time</div>
+        <div class="result-val" id="rTime">0</div>
+        <div class="result-unit">seconds</div>
+      </div>
+
+      <!-- Total word count -->
+      <div class="result-item">
+        <div class="result-label">Words</div>
+        <div class="result-val ok" id="rWords">0</div>
+        <div class="result-unit">total typed</div>
+      </div>
+
+      <!-- Valid (dictionary) words -->
+      <div class="result-item">
+        <div class="result-label">Valid</div>
+        <div class="result-val ok" id="rValid">0</div>
+        <div class="result-unit">real words</div>
+      </div>
+
+      <!-- Invalid (not in dictionary) words -->
+      <div class="result-item">
+        <div class="result-label">Invalid</div>
+        <div class="result-val err" id="rInvalid">0</div>
+        <div class="result-unit">not in dict</div>
+      </div>
+
+    </div><!-- /results-grid -->
+
+    <!-- Action buttons: dismiss overlay or reset and try again -->
+    <div class="results-actions">
+      <button class="btn btn-ghost" onclick="hideResults()">dismiss</button>
+      <button class="btn btn-primary" onclick="resetSession(); hideResults()">↺ try again</button>
+    </div>
+
+  </div><!-- /results-card -->
+</div><!-- /results-overlay -->
+
+
+<!-- ═══════════════════════════════════════════════
+     ELITE SETTINGS — FULLSCREEN DRAWER
+     Opens over the entire page via the ⚙ elite nav button.
+     Contains five panels: Themes, Colors, Fonts, Sounds, UI.
+     All settings are persisted to cookies by saveSettings().
+════════════════════════════════════════════════ -->
+
+<!-- Backdrop (reserved / currently unused visual layer) -->
+<div class="settings-backdrop" id="settingsBackdrop"></div>
+
+<div class="settings-drawer" id="settingsDrawer">
+
+  <!-- ── Drawer header ── -->
+  <div class="settings-header">
+    <div class="settings-title">
+      <span class="settings-crown">✦</span> Elite Settings
+    </div>
+    <!-- Close button: hides drawer and re-focuses the textarea -->
+    <button class="settings-close" onclick="closeSettings()">✕ close</button>
+  </div>
+
+
+  <!-- ── Two-column layout: vertical tab nav (left) + panel content (right) ── -->
+  <div class="settings-layout">
+
+    <!-- Left: vertical tab navigation -->
+    <div class="settings-tabs">
+      <!-- Each button calls switchTab() to show the matching panel -->
+      <button class="settings-tab active" onclick="switchTab('themes',this)">
+        <span class="settings-tab-icon">🎨</span> Themes
+      </button>
+      <button class="settings-tab" onclick="switchTab('colors',this)">
+        <span class="settings-tab-icon">🖌</span> Colors
+      </button>
+      <button class="settings-tab" onclick="switchTab('fonts',this)">
+        <span class="settings-tab-icon">Aa</span> Fonts
+      </button>
+      <button class="settings-tab" onclick="switchTab('sounds',this)">
+        <span class="settings-tab-icon">🔊</span> Sounds
+      </button>
+      <button class="settings-tab" onclick="switchTab('interface',this)">
+        <span class="settings-tab-icon">⚙</span> UI
+      </button>
+    </div><!-- /settings-tabs -->
+
+
+    <!-- Right: scrollable panel content area -->
+    <div class="settings-content">
+
+
+      <!-- ════════════════════════════
+           PANEL: THEMES
+           Preset color schemes grouped
+           by Catppuccin flavour and
+           classic built-in presets.
+           Grids are built dynamically
+           by buildPresetGrids() in JS.
+      ════════════════════════════ -->
+      <div class="settings-panel active" id="panel-themes">
+
+        <div class="settings-section">
+          <div class="settings-section-title">Catppuccin — Mocha</div>
+          <!-- Populated by buildPresetGrids() → group 'catmocha' -->
+          <div class="preset-grid" id="pg-catmocha"></div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title">Catppuccin — Macchiato</div>
+          <!-- Populated by buildPresetGrids() → group 'catmacchiato' -->
+          <div class="preset-grid" id="pg-catmacchiato"></div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title">Catppuccin — Frappé</div>
+          <!-- Populated by buildPresetGrids() → group 'catfrappe' -->
+          <div class="preset-grid" id="pg-catfrappe"></div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title">Catppuccin — Latte <span style="font-size:0.6rem;color:var(--muted)">(light)</span></div>
+          <!-- Populated by buildPresetGrids() → group 'catlatte' -->
+          <div class="preset-grid" id="pg-catlatte"></div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title">Classic Presets</div>
+          <!-- Populated by buildPresetGrids() → group 'classic' -->
+          <div class="preset-grid" id="pg-classic"></div>
+        </div>
+
+      </div><!-- /panel-themes -->
+
+
+      <!-- ════════════════════════════
+           PANEL: COLORS
+           Individual hex color pickers
+           for the six design tokens:
+           accent, bg, surface, text,
+           error, and ok (valid).
+      ════════════════════════════ -->
+      <div class="settings-panel" id="panel-colors">
+        <div class="settings-section">
+          <div class="settings-section-title">Custom Colors</div>
+          <div class="color-settings-grid">
+
+            <!-- Accent color (primary highlight, caret, buttons) -->
+            <div class="setting-row">
+              <label>Accent</label>
+              <div class="color-input-wrap">
+                <input type="color" id="s_accent" oninput="applySetting('accent',this.value)">
+                <input type="text" id="s_accent_hex" placeholder="#F76F8E" oninput="syncColorFromText('accent',this.value)" maxlength="7">
+              </div>
+            </div>
+
+            <!-- Background color (page fill) -->
+            <div class="setting-row">
+              <label>Background</label>
+              <div class="color-input-wrap">
+                <input type="color" id="s_bg" oninput="applySetting('bg',this.value)">
+                <input type="text" id="s_bg_hex" placeholder="#0e0e10" oninput="syncColorFromText('bg',this.value)" maxlength="7">
+              </div>
+            </div>
+
+            <!-- Surface color (cards, inputs, modals) -->
+            <div class="setting-row">
+              <label>Surface</label>
+              <div class="color-input-wrap">
+                <input type="color" id="s_surface" oninput="applySetting('surface',this.value)">
+                <input type="text" id="s_surface_hex" placeholder="#16161a" oninput="syncColorFromText('surface',this.value)" maxlength="7">
+              </div>
+            </div>
+
+            <!-- Text color (primary body text) -->
+            <div class="setting-row">
+              <label>Text</label>
+              <div class="color-input-wrap">
+                <input type="color" id="s_text" oninput="applySetting('text',this.value)">
+                <input type="text" id="s_text_hex" placeholder="#cccce0" oninput="syncColorFromText('text',this.value)" maxlength="7">
+              </div>
+            </div>
+
+            <!-- Error color (invalid words, low accuracy) -->
+            <div class="setting-row">
+              <label>Error</label>
+              <div class="color-input-wrap">
+                <input type="color" id="s_error" oninput="applySetting('error',this.value)">
+                <input type="text" id="s_error_hex" placeholder="#f43f5e" oninput="syncColorFromText('error',this.value)" maxlength="7">
+              </div>
+            </div>
+
+            <!-- Valid / OK color (correct words, high accuracy) -->
+            <div class="setting-row">
+              <label>Valid</label>
+              <div class="color-input-wrap">
+                <input type="color" id="s_ok" oninput="applySetting('ok',this.value)">
+                <input type="text" id="s_ok_hex" placeholder="#34d399" oninput="syncColorFromText('ok',this.value)" maxlength="7">
+              </div>
+            </div>
+
+          </div><!-- /color-settings-grid -->
+        </div>
+      </div><!-- /panel-colors -->
+
+
+      <!-- ════════════════════════════
+           PANEL: FONTS
+           Google Fonts name input with
+           live preview, quick-select
+           suggestion pills, and a font
+           size range slider.
+      ════════════════════════════ -->
+      <div class="settings-panel" id="panel-fonts">
+        <div class="settings-section">
+          <div class="settings-section-title">Typing Font</div>
+
+          <!-- Font family input + Apply button -->
+          <div class="setting-row">
+            <label>Google Font <span class="label-hint">(name)</span></label>
+            <div class="font-input-row">
+              <input type="text" id="s_monoFont" placeholder="e.g. Fira Code, Space Mono…" oninput="previewFont(this.value)">
+              <button class="btn btn-ghost" style="padding:8px 16px;font-size:0.75rem;" onclick="applyFont()">Apply</button>
+            </div>
+          </div>
+
+          <!-- Live font preview sentence — font-family updated by previewFont() / syncPanelUI() -->
+          <div class="font-preview" id="fontPreview">The quick brown fox jumps over the lazy dog. 0123456789</div>
+
+          <!-- Quick-select suggestion pills for popular coding fonts -->
+          <div class="font-suggestions">
+            <span class="font-suggestion" onclick="quickFont('JetBrains Mono')">JetBrains Mono</span>
+            <span class="font-suggestion" onclick="quickFont('Fira Code')">Fira Code</span>
+            <span class="font-suggestion" onclick="quickFont('Source Code Pro')">Source Code Pro</span>
+            <span class="font-suggestion" onclick="quickFont('Space Mono')">Space Mono</span>
+            <span class="font-suggestion" onclick="quickFont('Inconsolata')">Inconsolata</span>
+            <span class="font-suggestion" onclick="quickFont('Courier Prime')">Courier Prime</span>
+            <span class="font-suggestion" onclick="quickFont('IBM Plex Mono')">IBM Plex Mono</span>
+            <span class="font-suggestion" onclick="quickFont('Roboto Mono')">Roboto Mono</span>
+            <span class="font-suggestion" onclick="quickFont('Cascadia Code')">Cascadia Code</span>
+            <span class="font-suggestion" onclick="quickFont('Anonymous Pro')">Anonymous Pro</span>
+            <span class="font-suggestion" onclick="quickFont('Share Tech Mono')">Share Tech Mono</span>
+            <span class="font-suggestion" onclick="quickFont('Overpass Mono')">Overpass Mono</span>
+          </div>
+        </div>
+
+        <!-- Font size range slider (0.9rem – 2.2rem) -->
+        <div class="settings-section">
+          <div class="settings-section-title">Size</div>
+          <div class="setting-row">
+            <label>Font size</label>
+            <div class="slider-row">
+              <input type="range" id="s_fontSize" min="0.9" max="2.2" step="0.05" value="1.35" oninput="applyFontSize(this.value)">
+              <span id="s_fontSizeVal" class="slider-val">1.35rem</span>
+            </div>
+          </div>
+        </div>
+      </div><!-- /panel-fonts -->
+
+
+      <!-- ════════════════════════════
+           PANEL: SOUNDS
+           Preset synthesized keypress
+           sounds, custom file upload,
+           and volume / pitch controls.
+      ════════════════════════════ -->
+      <div class="settings-panel" id="panel-sounds">
+
+        <!-- Sound preset selector buttons -->
+        <div class="settings-section">
+          <div class="settings-section-title">Sound Preset</div>
+          <div class="sound-preset-grid">
+            <button class="sound-btn active" id="snd_none"       onclick="setSoundPreset('none',this)">🔇 Off</button>
+            <button class="sound-btn"        id="snd_click"      onclick="setSoundPreset('click',this)">🖱 Click</button>
+            <button class="sound-btn"        id="snd_mechanical" onclick="setSoundPreset('mechanical',this)">⌨ Mechanical</button>
+            <button class="sound-btn"        id="snd_soft"       onclick="setSoundPreset('soft',this)">🎵 Soft</button>
+            <button class="sound-btn"        id="snd_typewriter" onclick="setSoundPreset('typewriter',this)">🖨 Typewriter</button>
+            <button class="sound-btn"        id="snd_custom"     onclick="setSoundPreset('custom',this)">📁 Custom MP3</button>
+          </div>
+        </div>
+
+        <!-- Custom sound file upload row (only visible when 'custom' preset is selected) -->
+        <div class="settings-section" id="customSoundRow" style="display:none">
+          <div class="settings-section-title">Custom Sound File</div>
+          <div class="setting-row">
+            <label>Upload MP3</label>
+            <div class="upload-row">
+              <!-- Styled label acts as the visible upload button -->
+              <label class="upload-btn" for="soundFileInput">
+                <span id="uploadLabel">Choose MP3 / WAV / OGG…</span>
+              </label>
+              <!-- Hidden native file input triggered by the label above -->
+              <input type="file" id="soundFileInput" accept="audio/mpeg,audio/mp3,audio/wav,audio/ogg" onchange="loadCustomSound(this)">
+              <button class="btn btn-ghost" style="padding:8px 14px;font-size:0.75rem;" onclick="testSound()">▶ Test</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Volume and pitch variation sliders + test sequence button -->
+        <div class="settings-section">
+          <div class="settings-section-title">Sound Controls</div>
+          <div class="settings-grid">
+
+            <!-- Volume slider (0–100%) -->
+            <div class="setting-row">
+              <label>Volume</label>
+              <div class="slider-row">
+                <input type="range" id="s_volume" min="0" max="1" step="0.05" value="0.4" oninput="applyVolume(this.value)">
+                <span id="s_volumeVal" class="slider-val">40%</span>
+              </div>
+            </div>
+
+            <!-- Pitch variation slider (low / med / high) -->
+            <div class="setting-row">
+              <label>Pitch variation</label>
+              <div class="slider-row">
+                <input type="range" id="s_pitch" min="0" max="0.4" step="0.01" value="0.08" oninput="applyPitch(this.value)">
+                <span id="s_pitchVal" class="slider-val">low</span>
+              </div>
+            </div>
+
+          </div>
+          <!-- Play 3-keystroke preview sequence -->
+          <div style="margin-top:16px;">
+            <button class="btn btn-ghost" style="font-size:0.75rem;" onclick="testSound()">▶ Play test sequence</button>
+          </div>
+        </div>
+
+      </div><!-- /panel-sounds -->
+
+
+      <!-- ════════════════════════════
+           PANEL: UI (Interface)
+           On/off toggles for typing
+           behaviour and visual effects.
+      ════════════════════════════ -->
+      <div class="settings-panel" id="panel-interface">
+
+        <!-- Typing behaviour: word repetition toggle -->
+        <div class="settings-section">
+          <div class="settings-section-title">Typing Behaviour</div>
+          <div class="settings-grid">
+            <div class="setting-row toggle-row">
+              <div>
+                <label style="display:block">Allow word repetition</label>
+                <span style="font-size:0.7rem;color:var(--sub)">Repeated words won't count toward WPM when off</span>
+              </div>
+              <!-- Toggle calls toggleAllowRepeat() and re-renders word display immediately -->
+              <div class="toggle on" id="toggle_repeat" onclick="toggleAllowRepeat(this)">
+                <div class="toggle-thumb"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Visual toggles: noise, caret glow, stat animations -->
+        <div class="settings-section">
+          <div class="settings-section-title">Interface Toggles</div>
+          <div class="settings-grid">
+
+            <!-- Grain noise texture overlay on the background -->
+            <div class="setting-row toggle-row">
+              <label>Noise texture overlay</label>
+              <div class="toggle" id="toggle_noise" onclick="toggleNoise(this)">
+                <div class="toggle-thumb"></div>
+              </div>
+            </div>
+
+            <!-- Glowing caret effect in the textarea -->
+            <div class="setting-row toggle-row">
+              <label>Caret glow effect</label>
+              <div class="toggle on" id="toggle_caret" onclick="toggleCaretGlow(this)">
+                <div class="toggle-thumb"></div>
+              </div>
+            </div>
+
+            <!-- Animated transitions on stat number updates -->
+            <div class="setting-row toggle-row">
+              <label>Animate stat numbers</label>
+              <div class="toggle on" id="toggle_anim" onclick="toggleAnimStats(this)">
+                <div class="toggle-thumb"></div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+      </div><!-- /panel-interface -->
+
+
+    </div><!-- /settings-content -->
+  </div><!-- /settings-layout -->
+
+
+  <!-- ── Settings footer: reset and save/close buttons ── -->
+  <div class="settings-footer">
+    <!-- Resets all cookies and reverts to DEFAULTS -->
+    <button class="btn btn-ghost" onclick="resetAllSettings()" style="font-size:0.75rem;">↺ Reset defaults</button>
+    <!-- Persists all settings to cookies and closes the drawer -->
+    <button class="btn btn-primary" onclick="saveSettings(true)" style="font-size:0.75rem;">✓ Save &amp; close</button>
+  </div>
+
+</div><!-- /settings-drawer -->
+
+
+<!-- Application logic — loaded after all DOM elements are available -->
+<script src="script.js"></script>
+
+</body>
+</html>
